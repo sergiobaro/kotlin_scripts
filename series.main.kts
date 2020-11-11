@@ -12,6 +12,7 @@ if (args.size == 0) {
 
 val folder = args[0]
 
+
 // EPISODES
 
 data class Episode(val serieName: String, 
@@ -30,8 +31,7 @@ fun findEpisodes(folder: String): List<Episode> {
         val matchResult = fileRegex.find(fileName)
         matchResult?.let {
             val (serieName, season, episode, extension) = it.destructured
-            Episode(serieName.replace(".", " ").trim().capitalizeWords(),
-                        season, episode, extension, file)
+            Episode(serieName.formatName(), season, episode, extension, file)
         }
     }
 
@@ -40,35 +40,53 @@ fun findEpisodes(folder: String): List<Episode> {
 
 val episodes = findEpisodes(folder)
 
+
 // SUBTITLES
 
 data class Subtitle(val serieName: String,
                     val season: String,
                     val episode: String,
-                    val format: String,
                     val files: List<File>)
 
 fun findSubtitles(folder: String): List<Subtitle> {
+    val subtitlesMap = hashMapOf<String, MutableList<File>>()
     val subFolder = folder + "/Subs"
     val files = File(subFolder).listFiles { file -> file.extension == "idx" || file.extension == "sub" }
 
     val fileRegex = """^([\w\.]+)[Ss](\d\d)[Ee](\d\d).*\.(\w\w\w)$""".toRegex()
 
-    val subtitles = files.mapNotNull { file -> 
+    files.forEach { file -> 
         val fileName = file.name
         val matchResult = fileRegex.find(fileName)
         matchResult?.let {
-            val (serieName, season, episode, _) = it.destructured
-            Subtitle(serieName.replace(".", " ").trim().capitalizeWords(),
-                        season, episode, "idx", listOf(file))
+            val (_, season, episode, _) = it.destructured
+            val episodeKey = season + episode
+            if (subtitlesMap[episodeKey] == null) {
+                subtitlesMap[episodeKey] = mutableListOf()
+            }
+            subtitlesMap[episodeKey]!!.add(file)
         }
     }
+
+    val subtitles = mutableListOf<Subtitle>()
+
+    subtitlesMap.values.forEach { 
+        val matchResult = fileRegex.find(files[0].name)
+        if (matchResult != null) {
+            val (serieName, season, episode, _) = matchResult.destructured
+            val subtitle = Subtitle(serieName, season, episode, it)
+            subtitles.add(subtitle)
+        }
+    }
+
     return subtitles
 }
 
 val subtitles = findSubtitles(folder)
 subtitles.forEach { println(it) }
 
+
 // HELPERS
 
+fun String.formatName(): String = replace(".", " ").trim().capitalizeWords()
 fun String.capitalizeWords(): String = split(" ").map { it.capitalize() }.joinToString(" ")
