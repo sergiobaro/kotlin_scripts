@@ -3,14 +3,6 @@
 import kotlin.system.exitProcess
 import java.io.File
 
-// ARGUMENTS
-
-if (args.size == 0) {
-    println("Missing argument [folder]")
-    exitProcess(1)
-}
-val serieFolder = File(args[0])
-
 
 // DATA
 
@@ -20,6 +12,7 @@ data class EpisodeKey(val season: String, val episode: String, val seriesName: S
         return (season + episode).compareTo(other.season + other.episode)
     }
 }
+
 
 // FUNCTIONS
 
@@ -44,7 +37,15 @@ fun mapOfFiles(folder: File): Map<EpisodeKey, List<File>> {
     return filesByEpisode
 }
 
-fun runMkvMerge(episodeKey: EpisodeKey, files: List<File>) {
+fun makeDestFolder(episodeKey: EpisodeKey, folder: File): File {
+    val destFolderName = "${episodeKey.seriesName.fileFormat()}_${episodeKey.season}"
+    val destFolder = File("${folder}/../${destFolderName}/")
+    if (!destFolder.exists()) destFolder.mkdirs()
+
+    return destFolder
+}
+
+fun runMkvMerge(folder: File, episodeKey: EpisodeKey, files: List<File>): Boolean {
     println()
     println("EPISODE: ${episodeKey.season}${episodeKey.episode}")
 
@@ -53,15 +54,33 @@ fun runMkvMerge(episodeKey: EpisodeKey, files: List<File>) {
     println("mkvmerge -o ${outputFile} ${inputFilesToPrint}")
 
     val inputFiles = files.joinToString(" ")
-    "mkvmerge -o ${outputFile} ${inputFiles}".runCommand(serieFolder)
+    return "mkvmerge -o ${outputFile} ${inputFiles}".runCommand(folder) == 0
 }
+
+
+// ARGUMENTS
+
+if (args.size == 0) {
+    println("Missing argument [folder]")
+    exitProcess(1)
+}
+val originFolder = File(args[0])
 
 
 // MAIN
 
-val filesByEpisode = mapOfFiles(serieFolder).toSortedMap()
+val filesByEpisode = mapOfFiles(originFolder).toSortedMap()
+
+var success = true
 filesByEpisode.forEach { episodeKey, files ->
-    runMkvMerge(episodeKey, files)
+    if (success) {
+        val destFolder = makeDestFolder(episodeKey, originFolder)
+        success = runMkvMerge(destFolder, episodeKey, files)
+    }
+}
+
+if (success) {
+    originFolder.deleteRecursively()
 }
 
 
@@ -70,11 +89,12 @@ filesByEpisode.forEach { episodeKey, files ->
 fun String.formatName(): String = replace(".", " ").trim().capitalizeWords()
 fun String.fileFormat(): String = replace(" ", "_").toLowerCase()
 fun String.capitalizeWords(): String = split(" ").map { it.capitalize() }.joinToString(" ")
-fun String.runCommand(directory: File) {
-    ProcessBuilder(*split(" ").toTypedArray())
-            .directory(directory)
-            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-            .redirectError(ProcessBuilder.Redirect.INHERIT)
-            .start()
-            .waitFor()
+fun String.runCommand(directory: File): Int {
+    val process = ProcessBuilder(*split(" ").toTypedArray())
+        .directory(directory)
+        .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+        .redirectError(ProcessBuilder.Redirect.INHERIT)
+        .start()
+
+    return process.waitFor()
 }
