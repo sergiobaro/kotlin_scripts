@@ -9,84 +9,72 @@ if (args.size == 0) {
     println("Missing argument [folder]")
     exitProcess(1)
 }
+val serieFolder = File(args[0])
 
-val folder = args[0]
 
+// DATA
 
-// EPISODES
+data class EpisodeKey(val season: String, val episode: String, val seriesName: String): Comparable<EpisodeKey> {
 
-data class Episode(val serieName: String, 
-                    val season: String, 
-                    val episode: String, 
-                    val extension: String,
-                    val file: File)
-
-fun findEpisodes(folder: String): List<Episode> {
-    val files = File(folder).listFiles { file -> file.extension == "mkv" || file.extension == "mp4" }
-
-    val fileRegex = """^([\w\.]+)[Ss](\d\d)[Ee](\d\d).*\.(\w\w\w)$""".toRegex()
-
-    val episodes = files.mapNotNull { file -> 
-        val fileName = file.name
-        val matchResult = fileRegex.find(fileName)
-        matchResult?.let {
-            val (serieName, season, episode, extension) = it.destructured
-            Episode(serieName.formatName(), season, episode, extension, file)
-        }
+    override fun compareTo(other: EpisodeKey): Int {
+        return (season + episode).compareTo(other.season + other.episode)
     }
-
-    return episodes
 }
 
-val episodes = findEpisodes(folder)
+// FUNCTIONS
 
-
-// SUBTITLES
-
-data class Subtitle(val serieName: String,
-                    val season: String,
-                    val episode: String,
-                    val files: List<File>)
-
-fun findSubtitles(folder: String): List<Subtitle> {
-    val subtitlesMap = hashMapOf<String, MutableList<File>>()
-    val subFolder = folder + "/Subs"
-    val files = File(subFolder).listFiles { file -> file.extension == "idx" || file.extension == "sub" }
-
+fun mapOfFiles(folder: File): Map<EpisodeKey, List<File>> {
     val fileRegex = """^([\w\.]+)[Ss](\d\d)[Ee](\d\d).*\.(\w\w\w)$""".toRegex()
+    val filesByEpisode = hashMapOf<EpisodeKey, MutableList<File>>()
 
-    files.forEach { file -> 
-        val fileName = file.name
-        val matchResult = fileRegex.find(fileName)
-        matchResult?.let {
-            val (_, season, episode, _) = it.destructured
-            val episodeKey = season + episode
-            if (subtitlesMap[episodeKey] == null) {
-                subtitlesMap[episodeKey] = mutableListOf()
+    folder.walk()
+        .filter { it.isFile }
+        .forEach { file ->
+            val matchResult = fileRegex.find(file.name)
+            matchResult?.let {
+                val (seriesName, season, episode, _) = it.destructured
+                 val episodeKey = EpisodeKey(season, episode, seriesName.formatName())
+                 if (filesByEpisode[episodeKey] == null) {
+                     filesByEpisode[episodeKey] = mutableListOf()
+                 }
+                filesByEpisode[episodeKey]!!.add(file)
             }
-            subtitlesMap[episodeKey]!!.add(file)
         }
-    }
 
-    val subtitles = mutableListOf<Subtitle>()
-
-    subtitlesMap.values.forEach { 
-        val matchResult = fileRegex.find(files[0].name)
-        if (matchResult != null) {
-            val (serieName, season, episode, _) = matchResult.destructured
-            val subtitle = Subtitle(serieName, season, episode, it)
-            subtitles.add(subtitle)
-        }
-    }
-
-    return subtitles
+    return filesByEpisode
 }
 
-val subtitles = findSubtitles(folder)
-subtitles.forEach { println(it) }
+fun runMkvMerge(episodeKey: EpisodeKey, files: List<File>) {
+    println()
+    println("EPISODE: ${episodeKey.season}${episodeKey.episode}")
+
+    val outputFile = "${episodeKey.seriesName.fileFormat()}_s${episodeKey.season}e${episodeKey.episode}.mkv"
+    val inputFilesToPrint = files.map { it.name } .joinToString(" ")
+    println("mkvmerge -o ${outputFile} ${inputFilesToPrint}")
+
+    val inputFiles = files.joinToString(" ")
+    "mkvmerge -o ${outputFile} ${inputFiles}".runCommand(serieFolder)
+}
 
 
-// HELPERS
+// MAIN
+
+val filesByEpisode = mapOfFiles(serieFolder).toSortedMap()
+filesByEpisode.forEach { episodeKey, files ->
+    runMkvMerge(episodeKey, files)
+}
+
+
+// EXTENSIONS
 
 fun String.formatName(): String = replace(".", " ").trim().capitalizeWords()
+fun String.fileFormat(): String = replace(" ", "_").toLowerCase()
 fun String.capitalizeWords(): String = split(" ").map { it.capitalize() }.joinToString(" ")
+fun String.runCommand(directory: File) {
+    ProcessBuilder(*split(" ").toTypedArray())
+            .directory(directory)
+            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+            .redirectError(ProcessBuilder.Redirect.INHERIT)
+            .start()
+            .waitFor()
+}
